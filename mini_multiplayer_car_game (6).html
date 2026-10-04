@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Mini Multiplayer Car Game</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#101318;font-family:Arial,sans-serif;touch-action:none}
+  canvas{display:block;width:100%;height:100%;background:#3b7d3b}
+  #hud{position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:3;color:white;
+       background:#111b;padding:8px 14px;border-radius:14px;font-weight:bold;font-size:14px}
+  #help{position:fixed;top:12px;right:12px;z-index:3;color:#fff;background:#111b;padding:8px 10px;border-radius:10px;font-size:12px}
+  .joystick{position:fixed;width:130px;height:130px;border-radius:50%;bottom:25px;
+            background:#ffffff22;border:2px solid #ffffff55;z-index:5;display:none}
+  .stick{position:absolute;width:56px;height:56px;border-radius:50%;left:35px;top:35px;
+         background:#fff8;border:2px solid #fff}
+  #joy1{left:25px} #joy2{right:25px}
+  @media (pointer:coarse){.joystick{display:block}}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud">P1: 0 &nbsp; | &nbsp; P2: 0</div>
+<div id="help">P1: WASD + SHIFT &nbsp; P2: ARROWS + ENTER<br>Controllers: Left Stick + RT/R2</div>
+<div id="joy1" class="joystick"><div class="stick"></div></div>
+<div id="joy2" class="joystick"><div class="stick"></div></div>
+
+<script>
+const canvas=document.getElementById('game'), ctx=canvas.getContext('2d');
+let W=innerWidth,H=innerHeight,dpr=Math.min(devicePixelRatio||1,2);
+function resize(){W=innerWidth;H=innerHeight;canvas.width=W*dpr;canvas.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0)}
+addEventListener('resize',resize); resize();
+
+const keys={};
+addEventListener('keydown',e=>{keys[e.key.toLowerCase()]=true});
+addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false});
+
+let explosion=null;
+let winner=null;
+let winnerTime=0;
+const WINNER_SCREEN_TIME=2.5;
+
+const cars=[
+ {x:W*.35,y:H*.5,a:0,color:'#ff4d5a',score:0,joy:{x:0,y:0},nitro:100,boosting:false},
+ {x:W*.65,y:H*.5,a:Math.PI,color:'#4da3ff',score:0,joy:{x:0,y:0},nitro:100,boosting:false}
+];
+
+// PC GAMEPAD / JOYSTICK SUPPORT
+// Connect two USB/Bluetooth controllers before starting.
+// Controller 1 -> Player 1, Controller 2 -> Player 2.
+// The left analog stick controls each car.
+let gamepads=[];
+addEventListener('gamepadconnected', e => {
+  gamepads[e.gamepad.index]=e.gamepad;
+  updateControllerText();
+});
+addEventListener('gamepaddisconnected', e => {
+  delete gamepads[e.gamepad.index];
+  updateControllerText();
+});
+
+function pollGamepads(){
+  const pads=navigator.getGamepads ? navigator.getGamepads() : [];
+  gamepads=[];
+  for(const pad of pads) if(pad) gamepads[pad.index]=pad;
+}
+function axis(pad,n){
+  const v=pad?.axes?.[n] ?? 0;
+  return Math.abs(v)<0.12 ? 0 : v;
+}
+function updateControllerText(){
+  const count=gamepads.filter(Boolean).length;
+  document.getElementById('help').textContent =
+    count>=2 ? 'P1: Joystick 1  •  P2: Joystick 2' :
+    count===1 ? 'Joystick 1 connected • Connect a second joystick for P2' :
+    'Connect 2 joysticks • P1/P2';
+}
+
+function gamepadForPlayer(i){
+ const pads=navigator.getGamepads ? navigator.getGamepads() : [];
+ return pads.filter(Boolean)[i] || null;
+}
+
+function nitroPressed(i){
+ const pad=gamepadForPlayer(i);
+ // Keyboard: Shift for P1, Enter for P2
+ const key=i===0 ? keys.shift : keys.enter;
+ if(key) return true;
+ // Most gamepads: RT/R2 is axis 5; also accept button 7.
+ if(pad){
+   const trigger=(pad.axes && pad.axes.length>5) ? pad.axes[5] : 0;
+   return !!(pad.buttons[7]?.pressed || trigger>.35);
+ }
+ return false;
+}
+
+function input(i){
+ let x=0,y=0;
+
+ // Keyboard fallback
+ if(i===0){x=(keys.d?1:0)-(keys.a?1:0);y=(keys.s?1:0)-(keys.w?1:0)}
+ else{x=(keys.arrowright?1:0)-(keys.arrowleft?1:0);y=(keys.arrowdown?1:0)-(keys.arrowup?1:0)}
+
+ // Physical joystick/gamepad: first connected = P1, second = P2
+ const pads=gamepads.filter(Boolean);
+ const pad=pads[i];
+ if(pad){
+   const gx=axis(pad,0), gy=axis(pad,1);
+   if(Math.hypot(gx,gy)>.12){x=gx;y=gy}
+ }
+
+ // Touch joystick can also override keyboard/gamepad
+ const j=cars[i].joy;
+ if(Math.hypot(j.x,j.y)>.1){x=j.x;y=j.y}
+ return {x,y};
+}
+
+function setupJoystick(id,i){
+ const el=document.getElementById(id), stick=el.querySelector('.stick');
+ let active=false,pid=null;
+ function move(e){
+   if(!active || e.pointerId!==pid)return;
+   const r=el.getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height/2;
+   let dx=e.clientX-cx,dy=e.clientY-cy,max=45,d=Math.hypot(dx,dy);
+   if(d>max){dx=dx/d*max;dy=dy/d*max}
+   stick.style.transform=`translate(${dx}px,${dy}px)`;
+   cars[i].joy={x:dx/max,y:dy/max};
+ }
+ function end(e){
+   if(e.pointerId!==pid)return;
+   active=false;pid=null;stick.style.transform='translate(0,0)';cars[i].joy={x:0,y:0};
+ }
+ el.addEventListener('pointerdown',e=>{active=true;pid=e.pointerId;el.setPointerCapture(e.pointerId);move(e)});
+ el.addEventListener('pointermove',move);el.addEventListener('pointerup',end);el.addEventListener('pointercancel',end);
+}
+setupJoystick('joy1',0);setupJoystick('joy2',1); updateControllerText();
+
+const rocks=[];
+for(let i=0;i<18;i++) rocks.push({x:Math.random()*W,y:Math.random()*H,r:8+Math.random()*13});
+
+function update(c,i,dt){
+ const v=input(i), mag=Math.min(1,Math.hypot(v.x,v.y));
+ c.boosting=false;
+
+ if(mag>.08){
+   const target=Math.atan2(v.y,v.x);
+   let da=Math.atan2(Math.sin(target-c.a),Math.cos(target-c.a));
+   c.a+=da*Math.min(1,dt*7);
+
+   const wantNitro=nitroPressed(i) && c.nitro>0;
+   c.boosting=wantNitro;
+
+   let speed=185*mag;
+   if(wantNitro){
+     speed=335*mag;
+     c.nitro=Math.max(0,c.nitro-42*dt);
+   }else{
+     c.nitro=Math.min(100,c.nitro+14*dt);
+   }
+
+   c.x+=Math.cos(c.a)*speed*dt;
+   c.y+=Math.sin(c.a)*speed*dt;
+ }else{
+   c.nitro=Math.min(100,c.nitro+14*dt);
+ }
+
+ const pad=25;
+ c.x=Math.max(pad,Math.min(W-pad,c.x));c.y=Math.max(pad,Math.min(H-pad,c.y));
+}
+function drawTrack(){
+ ctx.fillStyle='#347236';ctx.fillRect(0,0,W,H);
+
+ // Open road track
+ ctx.strokeStyle='#5a5d62';ctx.lineWidth=120;ctx.beginPath();
+ ctx.moveTo(W*.08,H*.5);ctx.lineTo(W*.92,H*.5);ctx.stroke();
+
+ ctx.strokeStyle='#d9d9a0';ctx.lineWidth=4;ctx.setLineDash([22,18]);
+ ctx.beginPath();ctx.moveTo(W*.08,H*.5);ctx.lineTo(W*.92,H*.5);ctx.stroke();
+ ctx.setLineDash([]);
+
+ // Finish line at the end of the road
+ const fx=W*.88, roadTop=H*.5-60;
+ for(let row=0;row<6;row++){
+   for(let col=0;col<2;col++){
+     ctx.fillStyle=(row+col)%2===0?'#fff':'#111';
+     ctx.fillRect(fx+col*13,roadTop+row*20,13,20);
+   }
+ }
+ ctx.fillStyle='#fff';
+ ctx.font='bold 15px Arial';
+ ctx.textAlign='center';
+ ctx.fillText('FINISH',fx+13,roadTop-12);
+
+ for(const r of rocks){
+   ctx.fillStyle='#28592c';ctx.beginPath();ctx.arc(r.x,r.y,r.r,0,Math.PI*2);ctx.fill();
+ }
+}
+function drawCar(c){
+ ctx.save();ctx.translate(c.x,c.y);ctx.rotate(c.a);
+ ctx.fillStyle='#0006';ctx.fillRect(-19,-11,42,24);
+ ctx.fillStyle=c.color;roundRect(-21,-13,42,26,7);ctx.fill();
+ ctx.fillStyle='#bde7ff';roundRect(-8,-9,16,18,4);ctx.fill();
+ ctx.fillStyle='#222';ctx.fillRect(12,-10,6,7);ctx.fillRect(12,3,6,7);
+ ctx.fillStyle='#fff';ctx.fillRect(-21,-9,3,6);ctx.fillRect(-21,3,3,6);
+
+ if(c.boosting){
+   const flame=18+Math.random()*12;
+   ctx.fillStyle='#ffb000';
+   ctx.beginPath();ctx.moveTo(-21,0);ctx.lineTo(-21-flame,-7);ctx.lineTo(-21-flame*.7,0);ctx.lineTo(-21-flame,7);ctx.closePath();ctx.fill();
+   ctx.fillStyle='#fff3a0';
+   ctx.beginPath();ctx.moveTo(-21,0);ctx.lineTo(-21-flame*.65,-4);ctx.lineTo(-21-flame*.8,0);ctx.lineTo(-21-flame*.65,4);ctx.closePath();ctx.fill();
+ }
+ ctx.restore();
+}
+function roundRect(x,y,w,h,r){ctx.beginPath();ctx.roundRect(x,y,w,h,r)}
+
+function restartRace(){
+ winner=null;
+ winnerTime=0;
+ explosion=null;
+
+ cars[0].x=W*.35; cars[0].y=H*.5; cars[0].a=0;
+ cars[1].x=W*.65; cars[1].y=H*.5; cars[1].a=Math.PI;
+
+ cars.forEach(c=>{
+   c.nitro=100;
+   c.boosting=false;
+ });
+}
+
+function drawNitroMeters(){
+ ctx.save();
+ ctx.font='bold 12px Arial';
+ ctx.textAlign='left';
+ cars.forEach((c,i)=>{
+   const x=i===0?20:W-170, y=52, w=150,h=14;
+   ctx.fillStyle='#111c';ctx.fillRect(x-4,y-4,w+8,h+8);
+   ctx.fillStyle='#333';ctx.fillRect(x,y,w,h);
+   ctx.fillStyle=c.boosting?'#ffd32a':'#19d3ff';
+   ctx.fillRect(x,y,w*(c.nitro/100),h);
+   ctx.fillStyle='#fff';ctx.fillText(`P${i+1} NITRO`,x,y-8);
+ });
+ ctx.restore();
+}
+
+let last=performance.now();
+function loop(now){
+ const dt=Math.min(.035,(now-last)/1000);last=now;
+ pollGamepads();
+ if(winner===null) cars.forEach((c,i)=>update(c,i,dt));
+
+ // Reach the finish line
+ if(!winner){
+   const finishX=W*.88;
+   cars.forEach((c,i)=>{
+     if(c.x>=finishX-8){
+       winner=i;
+       winnerTime=0;
+     }
+   });
+ }
+
+ // Car-to-car collision: overlapping cars trigger a blast
+ if(!explosion && !winner){
+   const dx=cars[0].x-cars[1].x, dy=cars[0].y-cars[1].y;
+   if(Math.hypot(dx,dy)<34){
+     const mx=(cars[0].x+cars[1].x)/2, my=(cars[0].y+cars[1].y)/2;
+     explosion={x:mx,y:my,t:0,duration:.75};
+     cars[0].score++; cars[1].score++;
+     cars[0].x=W*.35; cars[0].y=H*.5; cars[0].a=0;
+     cars[1].x=W*.65; cars[1].y=H*.5; cars[1].a=Math.PI;
+   }
+ }
+
+ drawTrack();cars.forEach(drawCar);drawNitroMeters();
+
+ // Blast animation
+ if(explosion){
+   explosion.t+=dt;
+   const q=explosion.t/explosion.duration;
+   const radius=12+q*70;
+   ctx.save();
+   ctx.translate(explosion.x,explosion.y);
+   ctx.globalAlpha=Math.max(0,1-q);
+   for(let k=0;k<12;k++){
+     const a=k*Math.PI*2/12;
+     const len=25+q*35;
+     ctx.fillStyle='#ffb300';
+     ctx.fillRect(Math.cos(a)*len,Math.sin(a)*len,7,7);
+   }
+   ctx.beginPath();ctx.arc(0,0,radius,0,Math.PI*2);
+   ctx.fillStyle='#ff7a00';ctx.globalAlpha=Math.max(0,0.8-q*.8);ctx.fill();
+   ctx.beginPath();ctx.arc(0,0,radius*.55,0,Math.PI*2);
+   ctx.fillStyle='#ffe66d';ctx.globalAlpha=Math.max(0,1-q);ctx.fill();
+   ctx.restore();
+   if(explosion.t>=explosion.duration) explosion=null;
+ }
+
+ // Winner celebration animation
+ if(winner!==null){
+   winnerTime+=dt;
+   const c=cars[winner];
+   const pulse=1+Math.sin(winnerTime*8)*0.06;
+
+   ctx.save();
+   ctx.textAlign='center';
+
+   // Golden spotlight around winner
+   const grad=ctx.createRadialGradient(c.x,c.y,10,c.x,c.y,120);
+   grad.addColorStop(0,'rgba(255,230,80,.45)');
+   grad.addColorStop(1,'rgba(255,230,80,0)');
+   ctx.fillStyle=grad;
+   ctx.beginPath();ctx.arc(c.x,c.y,120,0,Math.PI*2);ctx.fill();
+
+   // Confetti
+   for(let k=0;k<30;k++){
+     const a=(k*2.4)+(winnerTime*.8);
+     const r=35+(k%6)*18;
+     const px=c.x+Math.cos(a)*r;
+     const py=c.y+Math.sin(a)*r*.65;
+     ctx.fillStyle=['#ff4757','#ffd32a','#1e90ff','#2ed573','#ffffff'][k%5];
+     ctx.fillRect(px,py,6,10);
+   }
+
+   ctx.translate(W/2,H*.22);
+   ctx.scale(pulse,pulse);
+   ctx.fillStyle='#111c';
+   ctx.fillRect(-170,-43,340,86);
+   ctx.strokeStyle='#ffd32a';ctx.lineWidth=4;
+   ctx.strokeRect(-170,-43,340,86);
+   ctx.fillStyle='#ffd32a';
+   ctx.font='bold 34px Arial';
+   ctx.fillText(`PLAYER ${winner+1} WINS!`,0,10);
+   ctx.fillStyle='#fff';
+   ctx.font='bold 15px Arial';
+   ctx.fillText('Race complete',0,35);
+   ctx.restore();
+
+   // Automatically start a new round after the winner celebration
+   if(winnerTime>=WINNER_SCREEN_TIME){
+     restartRace();
+   }
+ }
+
+ document.getElementById('hud').innerHTML=`P1: ${cars[0].score} &nbsp; | &nbsp; P2: ${cars[1].score}`;
+ requestAnimationFrame(loop);
+}
+loop(last);
+</script>
+</body>
+</html>
