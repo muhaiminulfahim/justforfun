@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#101318">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Car Controller</title>
+<style>
+  :root{--car:#2ed573}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+  html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#101318;color:#fff;font-family:Arial,sans-serif;touch-action:none;overscroll-behavior:none}
+  .screen{position:fixed;inset:0;display:none;flex-direction:column}
+  .screen.on{display:flex}
+
+  /* join + message screens */
+  #joinScreen,#msgScreen{align-items:center;justify-content:center;gap:16px;padding:24px;text-align:center}
+  h1{margin:0;font-size:28px}
+  p{margin:0;opacity:.75;line-height:1.45;max-width:320px}
+  .chip{display:inline-block;background:#ffffff14;border:1px solid #ffffff33;border-radius:999px;padding:6px 16px;font-weight:bold;letter-spacing:4px}
+  #name{width:min(300px,100%);padding:14px;border-radius:14px;border:1px solid #ffffff33;background:#0d1117;color:#fff;
+        font-size:18px;text-align:center;-webkit-user-select:text;user-select:text;outline:none}
+  #name:focus{border-color:#2f6bff}
+  .big{border:0;border-radius:16px;padding:16px 40px;font-size:20px;font-weight:bold;color:#fff;background:#2f6bff;cursor:pointer}
+  .big:active{transform:scale(.97)}
+
+  /* controller */
+  #top{display:flex;align-items:center;gap:10px;padding:max(10px,env(safe-area-inset-top)) 16px 6px}
+  #dot{width:14px;height:14px;border-radius:50%;background:var(--car);flex:none}
+  #pname{font-weight:bold;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:45vw}
+  #stat{font-size:12px;opacity:.7;margin-left:auto;white-space:nowrap}
+  #meterWrap{margin:0 16px;display:flex;align-items:center;gap:8px;font-size:11px;font-weight:bold;opacity:.9}
+  #meter{flex:1;height:12px;background:#2a2f3a;border-radius:8px;overflow:hidden}
+  #meter b{display:block;height:100%;width:100%;background:#19d3ff;transition:width .12s linear}
+  #meter.boost b{background:#ffd32a}
+  #zone{position:absolute;left:0;top:64px;bottom:0;width:62%}
+  #base{position:fixed;width:150px;height:150px;border-radius:50%;background:#ffffff1c;border:2px solid #ffffff55;pointer-events:none;left:0;top:0}
+  #knob{position:absolute;left:45px;top:45px;width:60px;height:60px;border-radius:50%;background:var(--car);border:3px solid #fff;opacity:.92}
+  #nitro{position:absolute;right:max(24px,env(safe-area-inset-right));bottom:max(30px,env(safe-area-inset-bottom));
+         width:132px;height:132px;border-radius:50%;border:4px solid #ffd32a;background:#ffd32a22;color:#ffd32a;
+         font:bold 20px Arial;display:flex;align-items:center;justify-content:center;touch-action:none}
+  #nitro.down{background:#ffd32a;color:#222;transform:scale(.96)}
+  #hint{position:absolute;left:0;right:0;bottom:6px;text-align:center;font-size:11px;opacity:.35;pointer-events:none}
+  #overlay,#banner{position:absolute;inset:0;display:none;align-items:center;justify-content:center;text-align:center;pointer-events:none}
+  #overlay{background:#101318cc;font-size:17px;padding:30px;flex-direction:column;gap:6px;z-index:5}
+  #banner{font-size:34px;font-weight:bold;color:#ffd32a;text-shadow:0 2px 12px #000;z-index:4;background:#0007;padding:20px}
+  #overlayText{white-space:pre-line}
+  #overlay.on,#banner.on{display:flex}
+</style>
+</head>
+<body>
+
+<div id="joinScreen" class="screen">
+  <h1>🏎️ Join the race</h1>
+  <span class="chip" id="roomChip"></span>
+  <input id="name" maxlength="14" placeholder="Your name (optional)" autocomplete="off" autocapitalize="words" enterkeyhint="go">
+  <button id="joinBtn" class="big" type="button">JOIN</button>
+  <p>Your phone becomes a joystick. Tip: turn it sideways.</p>
+</div>
+
+<div id="msgScreen" class="screen">
+  <h1 id="msgTitle">Oops</h1>
+  <p id="msgText"></p>
+  <button id="msgBtn" class="big" type="button">Try again</button>
+</div>
+
+<div id="padScreen" class="screen">
+  <div id="top"><span id="dot"></span><span id="pname">…</span><span id="stat">Connecting…</span></div>
+  <div id="meterWrap"><span>NITRO</span><div id="meter"><b></b></div></div>
+  <div id="zone"></div>
+  <div id="base"><div id="knob"></div></div>
+  <div id="nitro">NITRO</div>
+  <div id="hint">Drag the left side to steer · hold NITRO to boost</div>
+  <div id="overlay"><div id="overlayText"></div></div>
+  <div id="banner"><div id="bannerText"></div></div>
+</div>
+
+<script>
+(()=>{
+const $=id=>document.getElementById(id);
+const ROOM=((location.pathname.match(/\/j\/([A-Za-z0-9]+)/)||[])[1]||new URLSearchParams(location.search).get('room')||'').toUpperCase();
+const ss={get(k){try{return sessionStorage.getItem(k)||''}catch{return ''}},set(k,v){try{sessionStorage.setItem(k,v)}catch{}},del(k){try{sessionStorage.removeItem(k)}catch{}}};
+const ls={get(k){try{return localStorage.getItem(k)||''}catch{return ''}},set(k,v){try{localStorage.setItem(k,v)}catch{}}};
+
+function show(id){document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('on',s.id===id))}
+function vibrate(p){try{navigator.vibrate&&navigator.vibrate(p)}catch{}}
+
+// identity of this phone for this tab (lets it get the same car back after a reconnect)
+let PID=ss.get('pid');
+if(!PID){PID=Math.random().toString(36).slice(2,10)+Date.now().toString(36).slice(-4);ss.set('pid',PID)}
+let NAME=ls.get('name');
+
+let ws=null, joined=false, fatal=false, retry=0, retryTimer=null, started=false;
+let carColor='#2ed573';
+
+/* ---------- screens ---------- */
+function fail(title,text,canRetry){
+  fatal=true; joined=false;
+  try{ws&&ws.close()}catch{}
+  clearTimeout(retryTimer);
+  ss.del('joined:'+ROOM);
+  $('msgTitle').textContent=title;
+  $('msgText').textContent=text;
+  $('msgBtn').style.display=canRetry?'':'none';
+  show('msgScreen');
+}
+$('msgBtn').onclick=()=>location.reload();
+
+function setStatus(t){$('stat').textContent=t}
+function overlay(text){
+  const o=$('overlay');
+  if(text){$('overlayText').textContent=text;o.classList.add('on')}else o.classList.remove('on');
+}
+function setColor(c){carColor=c;document.documentElement.style.setProperty('--car',c)}
+
+let bannerTimer=null;
+function banner(text,ms){
+  $('bannerText').textContent=text;$('banner').classList.add('on');
+  clearTimeout(bannerTimer);bannerTimer=setTimeout(()=>$('banner').classList.remove('on'),ms||4000);
+}
+
+/* ---------- networking ---------- */
+function connect(){
+  clearTimeout(retryTimer);
+  const proto=location.protocol==='https:'?'wss':'ws';
+  const sock=new WebSocket(`${proto}://${location.host}/ws`);
+  ws=sock;
+  sock.onopen=()=>{
+    retry=0;
+    sock.send(JSON.stringify({t:'join',room:ROOM,pid:PID,name:NAME}));
+    setStatus('Joining…');
+  };
+  sock.onmessage=e=>{
+    let m;try{m=JSON.parse(e.data)}catch{return}
+    switch(m.t){
+      case 'joined':
+        joined=true;setStatus('Connected');
+        overlay(m.hostOnline===false?'Waiting for the host screen…':'');
+        break;
+      case 'car':
+        if(typeof m.name==='string')$('pname').textContent=m.name;
+        if(typeof m.color==='string'&&/^#[0-9a-fA-F]{6}$/.test(m.color))setColor(m.color);
+        break;
+      case 'st':{
+        const n=Math.max(0,Math.min(100,Number(m.n)||0));
+        $('meter').firstElementChild.style.width=n+'%';
+        $('meter').classList.toggle('boost',!!m.b);
+        break;
+      }
+      case 'ev':
+        if(m.k==='boom')vibrate([120,40,120]);
+        else if(m.k==='win'){
+          const me=m.pid&&m.pid===PID;
+          banner(me?'🏆 You win!':`${String(m.name||'Someone').slice(0,16)} wins!`,3500);
+          vibrate(me?[80,50,80,50,200]:60);
+        }else if(m.k==='restart')$('banner').classList.remove('on');
+        break;
+      case 'hostoffline':setStatus('Host offline');overlay('Host screen disconnected.\nWaiting for it to come back…');break;
+      case 'hostonline':setStatus('Connected');overlay('');break;
+      case 'closed':fail('Game ended','The host closed this game.',false);break;
+      case 'kicked':fail('Removed','The host removed you from the game.',false);break;
+      case 'error':
+        if(m.code==='full')fail('Game is full','No more cars fit in this race.',true);
+        else fail('Invite not valid',m.msg||'This invite link is no longer valid. Ask for a new one.',false);
+        break;
+    }
+  };
+  sock.onclose=()=>{
+    if(fatal||ws!==sock)return;
+    joined=false;
+    setStatus('Reconnecting…');
+    overlay('Connection lost.\nReconnecting…');
+    retryTimer=setTimeout(connect,Math.min(3000,500*(++retry)));
+  };
+  sock.onerror=()=>{};
+}
+
+/* ---------- joystick (floating base: appears where the thumb lands) ---------- */
+const zone=$('zone'), base=$('base'), knob=$('knob');
+const BASE=150, R=55;
+const joy={x:0,y:0};
+let joyPid=null, center={x:0,y:0};
+
+function placeBase(x,y){base.style.left=(x-BASE/2)+'px';base.style.top=(y-BASE/2)+'px'}
+function defaultCenter(){return {x:Math.max(105,Math.min(innerWidth*.3,200)),y:innerHeight-110}}
+function restBase(){const c=defaultCenter();placeBase(c.x,c.y);knob.style.transform='translate(0,0)';base.style.opacity='.55'}
+function moveStick(e){
+  let dx=e.clientX-center.x,dy=e.clientY-center.y;
+  const d=Math.hypot(dx,dy);
+  if(d>R){dx=dx/d*R;dy=dy/d*R}
+  knob.style.transform=`translate(${dx}px,${dy}px)`;
+  joy.x=dx/R;joy.y=dy/R;
+}
+zone.addEventListener('pointerdown',e=>{
+  if(joyPid!==null)return;
+  joyPid=e.pointerId;zone.setPointerCapture(e.pointerId);
+  const r=zone.getBoundingClientRect();
+  center={
+    x:Math.max(BASE/2,Math.min(r.right-BASE/2,e.clientX)),
+    y:Math.max(r.top+BASE/2,Math.min(r.bottom-BASE/2,e.clientY))
+  };
+  placeBase(center.x,center.y);base.style.opacity='1';
+  moveStick(e);
+});
+zone.addEventListener('pointermove',e=>{if(e.pointerId===joyPid)moveStick(e)});
+function endStick(e){
+  if(e.pointerId!==joyPid)return;
+  joyPid=null;joy.x=0;joy.y=0;restBase();
+}
+zone.addEventListener('pointerup',endStick);
+zone.addEventListener('pointercancel',endStick);
+addEventListener('resize',()=>{if(joyPid===null)restBase()});
+
+/* ---------- nitro button ---------- */
+const nitroBtn=$('nitro');
+let nitroDown=false,nitroPid=null;
+nitroBtn.addEventListener('pointerdown',e=>{
+  if(nitroPid!==null)return;
+  nitroPid=e.pointerId;nitroBtn.setPointerCapture(e.pointerId);
+  nitroDown=true;nitroBtn.classList.add('down');vibrate(15);
+});
+function endNitro(e){
+  if(e.pointerId!==nitroPid)return;
+  nitroPid=null;nitroDown=false;nitroBtn.classList.remove('down');
+}
+nitroBtn.addEventListener('pointerup',endNitro);
+nitroBtn.addEventListener('pointercancel',endNitro);
+document.addEventListener('contextmenu',e=>e.preventDefault());
+
+/* ---------- send input ~30x/sec (and a heartbeat while idle) ---------- */
+let sent={x:0,y:0,n:0},sentAt=0;
+setInterval(()=>{
+  if(!ws||ws.readyState!==1||!joined)return;
+  const hidden=document.visibilityState==='hidden';
+  const x=hidden?0:+joy.x.toFixed(2),y=hidden?0:+joy.y.toFixed(2),n=(!hidden&&nitroDown)?1:0;
+  const now=performance.now();
+  if(x!==sent.x||y!==sent.y||n!==sent.n||now-sentAt>400){
+    ws.send(JSON.stringify({t:'input',x,y,n}));
+    sent={x,y,n};sentAt=now;
+  }
+},33);
+
+/* ---------- keep the screen on ---------- */
+let wake=null;
+async function keepAwake(){
+  try{if('wakeLock' in navigator&&document.visibilityState==='visible')wake=await navigator.wakeLock.request('screen')}catch{}
+}
+document.addEventListener('visibilitychange',()=>{if(started&&document.visibilityState==='visible')keepAwake()});
+
+/* ---------- start ---------- */
+function startPlaying(fromTap){
+  if(started)return;
+  started=true;
+  ss.set('joined:'+ROOM,'1');
+  if(fromTap){
+    try{const el=document.documentElement;(el.requestFullscreen||el.webkitRequestFullscreen||(()=>{})).call(el)}catch{}
+  }
+  show('padScreen');
+  restBase();
+  overlay('Connecting…');
+  keepAwake();
+  connect();
+}
+
+if(!ROOM){
+  fail('No game found','Scan the QR code on the host screen, or open the invite link you were sent.',false);
+}else{
+  $('roomChip').textContent=ROOM;
+  $('name').value=NAME;
+  if(ss.get('joined:'+ROOM)){startPlaying(false)}   // page was reloaded mid-game: rejoin straight away
+  else show('joinScreen');
+}
+function doJoin(){
+  NAME=$('name').value.replace(/[<>]/g,'').trim().slice(0,14);
+  ls.set('name',NAME);
+  startPlaying(true);
+}
+$('joinBtn').onclick=doJoin;
+$('name').addEventListener('keydown',e=>{if(e.key==='Enter')doJoin()});
+})();
+</script>
+</body>
+</html>

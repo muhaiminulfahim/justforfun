@@ -1,0 +1,17 @@
+{
+  "name": "mini-multiplayer-car-game",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Mini car game with invite links: phones join as joystick controllers",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4",
+    "ws": "^8.18.0"
+  }
+}
