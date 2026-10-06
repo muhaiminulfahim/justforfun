@@ -9,7 +9,9 @@
   html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#101318;font-family:Arial,sans-serif;touch-action:none}
   canvas{display:block;width:100%;height:100%;background:#3b7d3b}
   #hud{position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:3;color:white;
-       background:#111b;padding:8px 14px;border-radius:14px;font-weight:bold;font-size:14px}
+       background:#111b;padding:8px 14px;border-radius:14px;font-weight:bold;font-size:14px;
+       display:flex;flex-wrap:wrap;gap:4px 16px;justify-content:center;max-width:min(56vw,640px)}
+  #hud i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px}
   #help{position:fixed;top:12px;right:12px;z-index:3;color:#fff;background:#111b;padding:8px 10px;border-radius:10px;font-size:12px}
   .joystick{position:fixed;width:130px;height:130px;border-radius:50%;bottom:25px;
             background:#ffffff22;border:2px solid #ffffff55;z-index:5;display:none}
@@ -17,17 +19,70 @@
          background:#fff8;border:2px solid #fff}
   #joy1{left:25px} #joy2{right:25px}
   @media (pointer:coarse){.joystick{display:block}}
+
+  /* ---- invite button + panel ---- */
+  #inviteBtn{position:fixed;top:12px;left:12px;z-index:4;border:0;color:#fff;background:#111b;
+             padding:8px 12px;border-radius:12px;font-weight:bold;font-size:13px;cursor:pointer}
+  #inviteBtn:hover{background:#2a3140}
+  .panel{position:fixed;inset:0;z-index:20;background:#000a;display:flex;align-items:center;justify-content:center;padding:14px}
+  .panel[hidden]{display:none}
+  .card{position:relative;width:min(380px,100%);max-height:100%;overflow:auto;touch-action:pan-y;
+        background:#181d26;color:#fff;border:1px solid #ffffff22;border-radius:18px;padding:20px 18px;
+        box-shadow:0 20px 60px #000a}
+  .card h2{margin:0 0 4px;font-size:20px}
+  .card h3{margin:16px 0 6px;font-size:14px;opacity:.85}
+  .sub{margin:0 0 12px;font-size:13px;line-height:1.45;opacity:.75}
+  #qr{display:block;margin:0 auto 12px;width:190px;height:190px;background:#fff;border-radius:12px;padding:6px}
+  #qr:not([src]){visibility:hidden}
+  .linkrow{display:flex;gap:8px}
+  .linkrow input{flex:1;min-width:0;background:#0d1117;color:#fff;border:1px solid #ffffff33;border-radius:10px;padding:9px 10px;font-size:13px}
+  .btn{border:0;border-radius:10px;padding:9px 12px;font-weight:bold;font-size:13px;color:#fff;background:#2f6bff;cursor:pointer}
+  .btn.ghost{background:#ffffff1a}
+  .btn[hidden]{display:none}
+  .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .x{position:absolute;top:10px;right:10px;width:30px;height:30px;border:0;border-radius:50%;background:#ffffff1a;color:#fff;cursor:pointer;font-size:14px}
+  .status{margin:10px 0 0;font-size:12.5px;line-height:1.4;color:#ffd78a;min-height:1em}
+  #plist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+  #plist li{display:flex;align-items:center;gap:8px;font-size:13px;background:#ffffff0d;border-radius:10px;padding:6px 8px}
+  #plist li i{width:10px;height:10px;border-radius:50%;flex:none}
+  #plist li span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #plist li em{opacity:.6;font-style:normal;font-size:11px}
+  #plist li button{border:0;background:#ffffff1a;color:#fff;border-radius:8px;cursor:pointer;padding:3px 8px;font-size:12px}
+  .empty{font-size:12.5px;opacity:.55}
 </style>
 </head>
 <body>
 <canvas id="game"></canvas>
-<div id="hud">P1: 0 &nbsp; | &nbsp; P2: 0</div>
+<div id="hud"></div>
+<button id="inviteBtn" type="button">👥 Invite players</button>
 <div id="help">P1: WASD + SHIFT &nbsp; P2: ARROWS + ENTER<br>Controllers: Left Stick + RT/R2</div>
 <div id="joy1" class="joystick"><div class="stick"></div></div>
 <div id="joy2" class="joystick"><div class="stick"></div></div>
 
+<div id="invite" class="panel" hidden>
+  <div class="card" role="dialog" aria-label="Invite players">
+    <button id="inviteClose" class="x" type="button" aria-label="Close">✕</button>
+    <h2>Invite players</h2>
+    <p class="sub">Scan the QR code (or open the link) on a phone connected to the same Wi-Fi.
+       The phone becomes a joystick and a new car appears on this screen. Keep this tab open.</p>
+    <img id="qr" alt="QR code for the invite link" width="190" height="190">
+    <div class="linkrow">
+      <input id="linkInput" readonly aria-label="Invite link">
+      <button id="copyBtn" class="btn" type="button">Copy</button>
+    </div>
+    <div class="row">
+      <button id="shareBtn" class="btn ghost" type="button" hidden>Share…</button>
+      <button id="altBtn" class="btn ghost" type="button" hidden>Wrong address? Try another</button>
+    </div>
+    <p id="inviteStatus" class="status"></p>
+    <h3>Players</h3>
+    <ul id="plist"></ul>
+  </div>
+</div>
+
 <script>
-const canvas=document.getElementById('game'), ctx=canvas.getContext('2d');
+const $=id=>document.getElementById(id);
+const canvas=$('game'), ctx=canvas.getContext('2d');
 let W=innerWidth,H=innerHeight,dpr=Math.min(devicePixelRatio||1,2);
 function resize(){W=innerWidth;H=innerHeight;canvas.width=W*dpr;canvas.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0)}
 addEventListener('resize',resize); resize();
@@ -36,20 +91,44 @@ const keys={};
 addEventListener('keydown',e=>{keys[e.key.toLowerCase()]=true});
 addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false});
 
-let explosion=null;
-let winner=null;
+const explosions=[];
+let winner=null;          // the car that reached the finish line
 let winnerTime=0;
 const WINNER_SCREEN_TIME=2.5;
 
+/* ================= CARS =================
+   Cars 0 and 1 are the two local players (keyboard / gamepad / touch joysticks).
+   Every phone that joins through an invite link adds a remote car (remote:true). */
 const cars=[
- {x:W*.35,y:H*.5,a:0,color:'#ff4d5a',score:0,joy:{x:0,y:0},nitro:100,boosting:false},
- {x:W*.65,y:H*.5,a:Math.PI,color:'#4da3ff',score:0,joy:{x:0,y:0},nitro:100,boosting:false}
+ {name:'Player 1',local:0,slot:0,color:'#ff4d5a',score:0,joy:{x:0,y:0},nitro:100,boosting:false,safe:0,x:0,y:0,a:0},
+ {name:'Player 2',local:1,slot:1,color:'#4da3ff',score:0,joy:{x:0,y:0},nitro:100,boosting:false,safe:0,x:0,y:0,a:0}
 ];
 
-// PC GAMEPAD / JOYSTICK SUPPORT
-// Connect two USB/Bluetooth controllers before starting.
-// Controller 1 -> Player 1, Controller 2 -> Player 2.
-// The left analog stick controls each car.
+/* ---------- start slots: spread out so cars never spawn on top of each other ---------- */
+let slotCache={key:'',list:[]};
+function getSlots(){
+ const key=W+'x'+H;
+ if(slotCache.key===key) return slotCache.list;
+ const cy=H*.5;
+ const list=[{x:W*.35,y:cy,a:0},{x:W*.65,y:cy,a:Math.PI}]; // original P1 / P2 positions
+ const pts=[];
+ for(let x=W*.10;x<=W*.72;x+=52) for(const dy of [-42,0,42]) pts.push({x,y:cy+dy,a:x<W*.5?0:Math.PI});
+ pts.sort((p,q)=>Math.abs(p.x-W*.5)-Math.abs(q.x-W*.5)||Math.abs(p.y-cy)-Math.abs(q.y-cy));
+ for(const p of pts) if(list.every(s=>Math.hypot(s.x-p.x,s.y-p.y)>=52)) list.push(p);
+ slotCache={key,list};
+ return list;
+}
+function getSlot(i){
+ const l=getSlots();
+ return i<l.length ? l[i] : {x:W*(.1+Math.random()*.6),y:H*.5+(Math.random()-.5)*80,a:0};
+}
+function placeAtSlot(c){const s=getSlot(c.slot);c.x=s.x;c.y=s.y;c.a=s.a}
+function nextSlot(){let s=2;while(cars.some(c=>c.slot===s))s++;return s}
+cars.forEach(placeAtSlot);
+
+/* ================= GAMEPAD / JOYSTICK SUPPORT (unchanged) =================
+   Connect two USB/Bluetooth controllers before starting.
+   Controller 1 -> Player 1, Controller 2 -> Player 2. */
 let gamepads=[];
 addEventListener('gamepadconnected', e => {
   gamepads[e.gamepad.index]=e.gamepad;
@@ -71,7 +150,7 @@ function axis(pad,n){
 }
 function updateControllerText(){
   const count=gamepads.filter(Boolean).length;
-  document.getElementById('help').textContent =
+  $('help').textContent =
     count>=2 ? 'P1: Joystick 1  •  P2: Joystick 2' :
     count===1 ? 'Joystick 1 connected • Connect a second joystick for P2' :
     'Connect 2 joysticks • P1/P2';
@@ -82,7 +161,11 @@ function gamepadForPlayer(i){
  return pads.filter(Boolean)[i] || null;
 }
 
-function nitroPressed(i){
+const REMOTE_STALE_MS=1200; // phone stops talking (sleep / lost Wi-Fi) -> its car stops
+
+function nitroFor(c){
+ if(c.remote) return performance.now()-c.rin.t<=REMOTE_STALE_MS && !!c.rin.n;
+ const i=c.local;
  const pad=gamepadForPlayer(i);
  // Keyboard: Shift for P1, Enter for P2
  const key=i===0 ? keys.shift : keys.enter;
@@ -95,7 +178,12 @@ function nitroPressed(i){
  return false;
 }
 
-function input(i){
+function inputFor(c){
+ if(c.remote){
+   if(performance.now()-c.rin.t>REMOTE_STALE_MS) return {x:0,y:0};
+   return {x:c.rin.x,y:c.rin.y};
+ }
+ const i=c.local;
  let x=0,y=0;
 
  // Keyboard fallback
@@ -111,13 +199,13 @@ function input(i){
  }
 
  // Touch joystick can also override keyboard/gamepad
- const j=cars[i].joy;
+ const j=c.joy;
  if(Math.hypot(j.x,j.y)>.1){x=j.x;y=j.y}
  return {x,y};
 }
 
 function setupJoystick(id,i){
- const el=document.getElementById(id), stick=el.querySelector('.stick');
+ const el=$(id), stick=el.querySelector('.stick');
  let active=false,pid=null;
  function move(e){
    if(!active || e.pointerId!==pid)return;
@@ -139,16 +227,19 @@ setupJoystick('joy1',0);setupJoystick('joy2',1); updateControllerText();
 const rocks=[];
 for(let i=0;i<18;i++) rocks.push({x:Math.random()*W,y:Math.random()*H,r:8+Math.random()*13});
 
-function update(c,i,dt){
- const v=input(i), mag=Math.min(1,Math.hypot(v.x,v.y));
+function update(c,dt){
+ if(c.safe>0) c.safe=Math.max(0,c.safe-dt);
  c.boosting=false;
+ if(c.connected===false) return; // phone dropped: car waits as a ghost for a few seconds
+
+ const v=inputFor(c), mag=Math.min(1,Math.hypot(v.x,v.y));
 
  if(mag>.08){
    const target=Math.atan2(v.y,v.x);
    let da=Math.atan2(Math.sin(target-c.a),Math.cos(target-c.a));
    c.a+=da*Math.min(1,dt*7);
 
-   const wantNitro=nitroPressed(i) && c.nitro>0;
+   const wantNitro=nitroFor(c) && c.nitro>0;
    c.boosting=wantNitro;
 
    let speed=185*mag;
@@ -198,6 +289,8 @@ function drawTrack(){
 }
 function drawCar(c){
  ctx.save();ctx.translate(c.x,c.y);ctx.rotate(c.a);
+ if(c.connected===false) ctx.globalAlpha=.35;
+ else if(c.safe>0 && Math.floor(c.safe*10)%2) ctx.globalAlpha=.5; // blink while protected after a respawn
  ctx.fillStyle='#0006';ctx.fillRect(-19,-11,42,24);
  ctx.fillStyle=c.color;roundRect(-21,-13,42,26,7);ctx.fill();
  ctx.fillStyle='#bde7ff';roundRect(-8,-9,16,18,4);ctx.fill();
@@ -215,26 +308,42 @@ function drawCar(c){
 }
 function roundRect(x,y,w,h,r){ctx.beginPath();ctx.roundRect(x,y,w,h,r)}
 
+// Name above every car; phone players also get a small nitro bar under theirs
+function drawLabel(c){
+ ctx.save();
+ ctx.globalAlpha=c.connected===false?.5:1;
+ ctx.font='bold 12px Arial';ctx.textAlign='center';ctx.lineJoin='round';
+ ctx.lineWidth=3;ctx.strokeStyle='#000a';ctx.strokeText(c.name,c.x,c.y-24);
+ ctx.fillStyle='#fff';ctx.fillText(c.name,c.x,c.y-24);
+ if(c.remote){
+   const w=40,x=c.x-w/2,y=c.y+22;
+   ctx.fillStyle='#000a';ctx.fillRect(x-1,y-1,w+2,6);
+   ctx.fillStyle=c.boosting?'#ffd32a':'#19d3ff';ctx.fillRect(x,y,w*(c.nitro/100),4);
+   if(c.connected===false){ctx.font='11px Arial';ctx.fillText('reconnecting…',c.x,c.y+40)}
+ }
+ ctx.restore();
+}
+
 function restartRace(){
  winner=null;
  winnerTime=0;
- explosion=null;
-
- cars[0].x=W*.35; cars[0].y=H*.5; cars[0].a=0;
- cars[1].x=W*.65; cars[1].y=H*.5; cars[1].a=Math.PI;
+ explosions.length=0;
 
  cars.forEach(c=>{
+   placeAtSlot(c);
    c.nitro=100;
    c.boosting=false;
+   c.safe=.8;
  });
+ netSend({t:'all',data:{t:'ev',k:'restart'}});
 }
 
 function drawNitroMeters(){
  ctx.save();
  ctx.font='bold 12px Arial';
  ctx.textAlign='left';
- cars.forEach((c,i)=>{
-   const x=i===0?20:W-170, y=52, w=150,h=14;
+ cars.filter(c=>!c.remote).forEach((c,i)=>{
+   const x=i===0?20:W-170, y=70, w=150,h=14;
    ctx.fillStyle='#111c';ctx.fillRect(x-4,y-4,w+8,h+8);
    ctx.fillStyle='#333';ctx.fillRect(x,y,w,h);
    ctx.fillStyle=c.boosting?'#ffd32a':'#19d3ff';
@@ -244,44 +353,247 @@ function drawNitroMeters(){
  ctx.restore();
 }
 
+/* ---------- scoreboard (built with textContent: player names are untrusted input) ---------- */
+let hudSig='';
+function refreshHud(){
+ const sig=cars.map(c=>c.name+'\u0001'+c.score+c.color).join('|');
+ if(sig===hudSig) return;
+ hudSig=sig;
+ const hud=$('hud'); hud.textContent='';
+ for(const c of cars){
+   const s=document.createElement('span'), d=document.createElement('i');
+   d.style.background=c.color;
+   s.append(d,`${c.name}: ${c.score}`);
+   hud.append(s);
+ }
+}
+
+/* ================= MULTIPLAYER (invite links) ================= */
+const store={
+ get(k){try{return sessionStorage.getItem(k)||''}catch{return ''}},
+ set(k,v){try{sessionStorage.setItem(k,v)}catch{}},
+ del(k){try{sessionStorage.removeItem(k)}catch{}}
+};
+const net={ws:null,online:false,want:false,retry:0,timer:null,
+           code:store.get('room'),key:store.get('roomKey'),
+           ips:[],ipIdx:0,infoLoaded:false};
+const PALETTE=['#2ed573','#ffd32a','#ff9f43','#a55eea','#18dcff','#ff6b81','#7bed9f','#eccc68','#70a1ff','#fd79a8','#badc58','#e056fd'];
+let playerNo=3; // "Player 3", "Player 4"... for phones that don't type a name
+
+const remotes=()=>cars.filter(c=>c.remote);
+const carByPid=pid=>cars.find(c=>c.pid===pid);
+const num=v=>typeof v==='number'&&isFinite(v)?v:0;
+function netSend(o){ if(net.ws&&net.ws.readyState===1) net.ws.send(JSON.stringify(o)); }
+
+function pickColor(){
+ return PALETTE.find(p=>!cars.some(c=>c.color===p)) || '#'+Math.floor(Math.random()*0xffffff).toString(16).padStart(6,'0');
+}
+function uniqueName(raw){
+ let n=String(raw||'').replace(/[\u0000-\u001f<>]/g,'').trim().slice(0,14);
+ if(!n) n='Player '+(playerNo++);
+ const base=n; let k=2;
+ while(cars.some(c=>c.name===n)) n=(base.slice(0,11)+' '+(k++));
+ return n;
+}
+function sendCar(c){ netSend({t:'to',pid:c.pid,data:{t:'car',name:c.name,color:c.color}}); }
+
+function addRemote(pid,name){
+ let c=carByPid(pid);
+ if(c){ // same phone reconnecting: it gets its car back
+   c.connected=true; clearTimeout(c.rmTimer); c.rmTimer=null;
+   c.rin={x:0,y:0,n:0,t:0};
+   sendCar(c); refreshInvite(); return c;
+ }
+ if(remotes().length>=12){ netSend({t:'kick',pid}); return null; }
+ c={remote:true,pid,connected:true,name:uniqueName(name),slot:nextSlot(),color:pickColor(),
+    score:0,nitro:100,boosting:false,safe:1.5,x:0,y:0,a:0,rin:{x:0,y:0,n:0,t:0},rmTimer:null};
+ placeAtSlot(c);
+ cars.push(c);
+ sendCar(c); refreshHud(); refreshInvite();
+ return c;
+}
+function dropRemote(pid){
+ const c=carByPid(pid); if(!c) return;
+ c.connected=false; c.boosting=false; c.rin={x:0,y:0,n:0,t:0};
+ clearTimeout(c.rmTimer);
+ c.rmTimer=setTimeout(()=>{ if(c.connected===false) removeCar(c); },12000);
+ refreshInvite();
+}
+function removeCar(c){
+ clearTimeout(c.rmTimer);
+ const i=cars.indexOf(c); if(i>=0) cars.splice(i,1);
+ refreshHud(); refreshInvite();
+}
+
+function hostConnect(){
+ clearTimeout(net.timer);
+ const proto=location.protocol==='https:'?'wss':'ws';
+ let ws;
+ try{ ws=new WebSocket(`${proto}://${location.host}/ws`); }catch{ return; }
+ net.ws=ws;
+ ws.onopen=()=>{
+   net.retry=0;
+   ws.send(JSON.stringify(net.code&&net.key?{t:'host',room:net.code,key:net.key}:{t:'host'}));
+ };
+ ws.onmessage=e=>{ let m; try{m=JSON.parse(e.data)}catch{return} onNet(m); };
+ ws.onclose=()=>{
+   if(net.ws!==ws) return;
+   net.online=false; refreshInvite();
+   if(net.want) net.timer=setTimeout(hostConnect,Math.min(4000,600*(++net.retry)));
+ };
+ ws.onerror=()=>{};
+}
+function onNet(m){
+ switch(m.t){
+  case 'room':
+   net.code=m.code; net.key=m.key; net.online=true;
+   store.set('room',m.code); store.set('roomKey',m.key);
+   refreshInvite(); break;
+  case 'join': addRemote(String(m.pid),m.name); break;
+  case 'leave': dropRemote(String(m.pid)); break;
+  case 'input': {
+   const c=carByPid(String(m.pid)); if(!c) break;
+   let x=num(m.x),y=num(m.y); const mg=Math.hypot(x,y); if(mg>1){x/=mg;y/=mg}
+   c.rin={x,y,n:m.n?1:0,t:performance.now()};
+   break;
+  }
+  case 'error':
+   if(m.code==='no-room'){ // old room expired: start a fresh one
+     net.code=''; net.key=''; store.del('room'); store.del('roomKey');
+     if(net.ws) net.ws.close();
+   } else { $('inviteStatus').textContent=m.msg||'Server error'; }
+   break;
+ }
+}
+
+/* ---------- invite panel ---------- */
+const panel=$('invite'), qr=$('qr'), linkInput=$('linkInput'), statusEl=$('inviteStatus');
+const isLocalHost=()=>/^(localhost|127\.\d+\.\d+\.\d+|\[::1\]|::1|0\.0\.0\.0)$/.test(location.hostname);
+
+function inviteLink(){
+ if(!net.code) return '';
+ let base=location.origin;
+ // opened as localhost? phones can't reach that, so use this computer's network address
+ if(isLocalHost()&&net.ips.length){
+   const p=net.ips[net.ipIdx%net.ips.length];
+   base=`http://${p.ip}${location.port?':'+location.port:''}`;
+ }
+ return `${base}/j/${net.code}`;
+}
+function refreshInvite(){
+ const n=remotes().length;
+ $('inviteBtn').textContent=n?`👥 Invite · ${n}`:'👥 Invite players';
+ const link=inviteLink();
+ linkInput.value=link;
+ if(link&&qr.dataset.link!==link){ qr.dataset.link=link; qr.src='/api/qr?text='+encodeURIComponent(link); }
+
+ let msg='';
+ if(location.protocol==='file:') msg='Multiplayer needs the game server: run "npm install" then "npm start", and open http://localhost:3000.';
+ else if(!net.online) msg=net.code?'Reconnecting to the server…':'Creating your invite link…';
+ else if(isLocalHost()&&net.infoLoaded&&!net.ips.length) msg="Couldn't detect your network address. Open this page through your computer's IP (for example http://192.168.1.5:3000) so phones can reach it.";
+ else if(!n) msg='Waiting for players to join…';
+ statusEl.textContent=msg;
+
+ const alt=$('altBtn');
+ alt.hidden=!(isLocalHost()&&net.ips.length>1);
+ if(!alt.hidden) alt.textContent=`Using ${net.ips[net.ipIdx%net.ips.length].ip} · try another address`;
+ $('shareBtn').hidden=!(navigator.share&&link);
+
+ const list=$('plist'); list.textContent='';
+ if(!n){ const li=document.createElement('li'); li.className='empty'; li.textContent='No phones connected yet.'; list.append(li); }
+ for(const c of remotes()){
+   const li=document.createElement('li'), d=document.createElement('i'), s=document.createElement('span'), b=document.createElement('button');
+   d.style.background=c.color; s.textContent=c.name;
+   b.textContent='Remove'; b.onclick=()=>{ netSend({t:'kick',pid:c.pid}); removeCar(c); };
+   li.append(d,s);
+   if(c.connected===false){ const em=document.createElement('em'); em.textContent='reconnecting…'; li.append(em); }
+   li.append(b); list.append(li);
+ }
+}
+function loadInfo(){
+ if(net.infoLoaded) return;
+ fetch('/api/info').then(r=>r.json()).then(i=>{ net.ips=Array.isArray(i.ips)?i.ips:[]; net.infoLoaded=true; refreshInvite(); }).catch(()=>{});
+}
+function openInvite(){
+ panel.hidden=false;
+ if(location.protocol!=='file:'){
+   net.want=true;
+   if(!net.ws) hostConnect();
+   loadInfo();
+ }
+ refreshInvite();
+}
+$('inviteBtn').onclick=openInvite;
+$('inviteClose').onclick=()=>{panel.hidden=true};
+panel.addEventListener('pointerdown',e=>{ if(e.target===panel) panel.hidden=true; });
+addEventListener('keydown',e=>{ if(e.key==='Escape') panel.hidden=true; });
+$('altBtn').onclick=()=>{ net.ipIdx=(net.ipIdx+1)%net.ips.length; refreshInvite(); };
+$('shareBtn').onclick=()=>{ navigator.share({title:'Join my car race',url:inviteLink()}).catch(()=>{}); };
+$('copyBtn').onclick=async()=>{
+ const link=linkInput.value; if(!link) return;
+ try{ await navigator.clipboard.writeText(link); }
+ catch{ linkInput.select(); try{document.execCommand('copy')}catch{} }
+ $('copyBtn').textContent='Copied ✓'; setTimeout(()=>{$('copyBtn').textContent='Copy'},1500);
+};
+
+// A reloaded host tab quietly resumes its room, so phones reconnect on their own
+if(location.protocol!=='file:' && net.code && net.key){ net.want=true; hostConnect(); }
+
+/* ================= MAIN LOOP ================= */
+let netTimer=0;
 let last=performance.now();
 function loop(now){
  const dt=Math.min(.035,(now-last)/1000);last=now;
  pollGamepads();
- if(winner===null) cars.forEach((c,i)=>update(c,i,dt));
+ if(winner===null) cars.forEach(c=>update(c,dt));
 
- // Reach the finish line
+ // Reach the finish line (the car that is furthest along wins a same-frame tie)
  if(!winner){
    const finishX=W*.88;
-   cars.forEach((c,i)=>{
-     if(c.x>=finishX-8){
-       winner=i;
-       winnerTime=0;
-     }
-   });
- }
-
- // Car-to-car collision: overlapping cars trigger a blast
- if(!explosion && !winner){
-   const dx=cars[0].x-cars[1].x, dy=cars[0].y-cars[1].y;
-   if(Math.hypot(dx,dy)<34){
-     const mx=(cars[0].x+cars[1].x)/2, my=(cars[0].y+cars[1].y)/2;
-     explosion={x:mx,y:my,t:0,duration:.75};
-     cars[0].score++; cars[1].score++;
-     cars[0].x=W*.35; cars[0].y=H*.5; cars[0].a=0;
-     cars[1].x=W*.65; cars[1].y=H*.5; cars[1].a=Math.PI;
+   let best=null;
+   for(const c of cars) if(c.connected!==false && c.x>=finishX-8 && (!best||c.x>best.x)) best=c;
+   if(best){
+     winner=best; winnerTime=0;
+     netSend({t:'all',data:{t:'ev',k:'win',pid:best.pid||null,name:best.name}});
    }
  }
 
- drawTrack();cars.forEach(drawCar);drawNitroMeters();
+ // Car-to-car collision: overlapping cars trigger a blast and both respawn
+ if(!winner){
+   const hit=new Set();
+   for(let a=0;a<cars.length;a++){
+     const A=cars[a];
+     if(A.connected===false||A.safe>0||hit.has(A)) continue;
+     for(let b=a+1;b<cars.length;b++){
+       const B=cars[b];
+       if(B.connected===false||B.safe>0||hit.has(B)) continue;
+       if(Math.hypot(A.x-B.x,A.y-B.y)<34){
+         explosions.push({x:(A.x+B.x)/2,y:(A.y+B.y)/2,t:0,duration:.75});
+         A.score++; B.score++;
+         for(const c of [A,B]){
+           placeAtSlot(c); c.safe=1.2; c.boosting=false;
+           if(c.remote) netSend({t:'to',pid:c.pid,data:{t:'ev',k:'boom'}});
+         }
+         hit.add(A); hit.add(B);
+         break;
+       }
+     }
+   }
+ }
 
- // Blast animation
- if(explosion){
-   explosion.t+=dt;
-   const q=explosion.t/explosion.duration;
+ drawTrack();
+ cars.forEach(drawCar);
+ cars.forEach(drawLabel);
+ drawNitroMeters();
+
+ // Blast animations
+ for(let n=explosions.length-1;n>=0;n--){
+   const ex=explosions[n];
+   ex.t+=dt;
+   const q=ex.t/ex.duration;
    const radius=12+q*70;
    ctx.save();
-   ctx.translate(explosion.x,explosion.y);
+   ctx.translate(ex.x,ex.y);
    ctx.globalAlpha=Math.max(0,1-q);
    for(let k=0;k<12;k++){
      const a=k*Math.PI*2/12;
@@ -294,13 +606,13 @@ function loop(now){
    ctx.beginPath();ctx.arc(0,0,radius*.55,0,Math.PI*2);
    ctx.fillStyle='#ffe66d';ctx.globalAlpha=Math.max(0,1-q);ctx.fill();
    ctx.restore();
-   if(explosion.t>=explosion.duration) explosion=null;
+   if(ex.t>=ex.duration) explosions.splice(n,1);
  }
 
  // Winner celebration animation
  if(winner!==null){
    winnerTime+=dt;
-   const c=cars[winner];
+   const c=winner;
    const pulse=1+Math.sin(winnerTime*8)*0.06;
 
    ctx.save();
@@ -323,15 +635,17 @@ function loop(now){
      ctx.fillRect(px,py,6,10);
    }
 
+   const title=`${c.name.toUpperCase()} WINS!`;
    ctx.translate(W/2,H*.22);
    ctx.scale(pulse,pulse);
-   ctx.fillStyle='#111c';
-   ctx.fillRect(-170,-43,340,86);
-   ctx.strokeStyle='#ffd32a';ctx.lineWidth=4;
-   ctx.strokeRect(-170,-43,340,86);
-   ctx.fillStyle='#ffd32a';
    ctx.font='bold 34px Arial';
-   ctx.fillText(`PLAYER ${winner+1} WINS!`,0,10);
+   const bw=Math.max(340,ctx.measureText(title).width+60);
+   ctx.fillStyle='#111c';
+   ctx.fillRect(-bw/2,-43,bw,86);
+   ctx.strokeStyle='#ffd32a';ctx.lineWidth=4;
+   ctx.strokeRect(-bw/2,-43,bw,86);
+   ctx.fillStyle='#ffd32a';
+   ctx.fillText(title,0,10);
    ctx.fillStyle='#fff';
    ctx.font='bold 15px Arial';
    ctx.fillText('Race complete',0,35);
@@ -343,9 +657,18 @@ function loop(now){
    }
  }
 
- document.getElementById('hud').innerHTML=`P1: ${cars[0].score} &nbsp; | &nbsp; P2: ${cars[1].score}`;
+ // Tell each phone its nitro level a few times per second
+ netTimer+=dt;
+ if(netTimer>.12){
+   netTimer=0;
+   if(net.online) for(const c of cars) if(c.remote&&c.connected!==false)
+     netSend({t:'to',pid:c.pid,data:{t:'st',n:Math.round(c.nitro),b:c.boosting?1:0}});
+ }
+
+ refreshHud();
  requestAnimationFrame(loop);
 }
+refreshHud();
 loop(last);
 </script>
 </body>
